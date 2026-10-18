@@ -3,7 +3,6 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://localhost', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'x');
-const TEST_BYPASS = process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_TEST_MODE === 'true';
 const col = () => '#002366';
 const tierNames = { 'Below Average': 'Starting', Average: 'Developing', 'Above Average': 'Balanced', Attractive: 'Polished', 'Very Attractive': 'Refined', Elite: 'Distinctive' };
 const tierName = label => tierNames[label] || label;
@@ -42,28 +41,6 @@ const Gauge = ({ v }) => {
   </svg>;
 };
 const Bar = ({ v }) => <div className="bar"><i style={{ width: v * 10 + '%', background: col(v) }} /></div>;
-
-function Auth() {
-  const [em, setEm] = useState(''), [pw, setPw] = useState(''), [up, setUp] = useState(false), [err, setErr] = useState(''), [busy, setBusy] = useState(false);
-  const go = async () => {
-    setBusy(true); setErr('');
-    const { error } = up ? await sb.auth.signUp({ email: em, password: pw }) : await sb.auth.signInWithPassword({ email: em, password: pw });
-    if (error) setErr(error.message);
-    else if (up) { const r = await sb.auth.signInWithPassword({ email: em, password: pw }); if (r.error) setErr('Check your email to confirm, then sign in.'); }
-    setBusy(false);
-  };
-  return <div>
-    <h1 style={{ marginTop: 60 }}>Facet AI</h1>
-    <p>Clear feedback. Practical steps.</p>
-    <div className="card">
-      <input type="email" placeholder="Email" value={em} onChange={e => setEm(e.target.value)} aria-label="Email" />
-      <input type="password" placeholder="Password (8+ characters)" value={pw} onChange={e => setPw(e.target.value)} aria-label="Password" />
-      {err && <div className="err">{err}</div>}
-      <button className="btn" disabled={busy || !em || pw.length < 8} onClick={go}>{up ? 'Create account' : 'Sign in'}</button>
-      <button className="btn alt" onClick={() => setUp(!up)}>{up ? 'I have an account' : 'Create an account'}</button>
-    </div>
-  </div>;
-}
 
 function Onboard({ done }) {
   const [step, setStep] = useState(0), [a, setA] = useState({}), [ck, setCk] = useState([false, false, false]), [err, setErr] = useState('');
@@ -215,31 +192,51 @@ function History({ go, open, me }) {
   </div>;
 }
 
-function Settings({ me, reload, out, go, testBypass }) {
+function Settings({ me, reload, go }) {
   const [msg, setMsg] = useState(''), [legal, setLegal] = useState(null);
   const p = me.profile || {};
   const set = async (k, v) => { await api('settings', { [k]: v }); reload(); };
-  const del = async mode => { if (!confirm(mode === 'account' ? 'Delete your account and all data?' : 'Delete all your photos?')) return; await api('delete', { mode }); if (mode === 'account') out(); else setMsg('Photos deleted.'); };
+  const del = async mode => { if (!confirm(mode === 'account' ? 'Delete your data and guest session?' : 'Delete all your photos?')) return; await api('delete', { mode }); if (mode === 'account') await sb.auth.signOut(); else setMsg('Photos deleted.'); };
   if (legal) return <div><button className="btn alt" onClick={() => setLegal(null)}>Back</button><h2>{nice(legal)}</h2><p>{LEGAL[legal]}</p></div>;
-  return <div><h1>Profile</h1><p>{me.email}</p>
+  return <div><h1>Profile</h1><p>{me.isAnonymous ? 'Guest session' : me.email}</p>
     {[['gender', ['male', 'female', 'other']], ['age_range', ['18 to 24', '25 to 34', '35 to 44', '45 plus']], ['main_goal', ['Facial balance', 'Skin', 'Hair', 'Personal style', 'Confidence']]].map(([k, o]) => <div key={k}><h2>{nice(k)}</h2><div className="chips">{o.map(x => <button key={x} className={'chip' + (p[k] === x ? ' on' : '')} style={p[k] === x ? { background: '#002366' } : {}} onClick={() => set(k, x)}>{nice(x)}</button>)}</div></div>)}
     <h2>Subscription</h2><div className="card"><div className="row"><span>{me.sub ? `${nice(me.sub.plan)} · ${me.sub.status}` : 'Free'}</span>{me.sub?.current_period_end && <span className="g">Renews {new Date(me.sub.current_period_end).toLocaleDateString()}</span>}</div>
       {me.paid ? <button className="btn alt" onClick={async () => { await api('cancel', {}); reload(); }}>Cancel subscription</button> : <button className="btn" onClick={() => go('paywall')}>Upgrade</button>}</div>
     <h2>Privacy</h2><div className="card">
       <label className="row"><span>Keep photos for progress tracking</span><input type="checkbox" checked={!!p.keep_photos} onChange={e => set('keep_photos', e.target.checked)} /></label>
-      <button className="btn alt" onClick={() => del('photos')}>Delete all photos</button><button className="btn alt" onClick={() => del('account')}>Delete my account and data</button>{msg && <p>{msg}</p>}</div>
+      <button className="btn alt" onClick={() => del('photos')}>Delete all photos</button><button className="btn alt" onClick={() => del('account')}>Delete my data and session</button>{msg && <p>{msg}</p>}</div>
     <h2>Legal and help</h2><div className="chips">{Object.keys(LEGAL).map(k => <button key={k} className="chip" onClick={() => setLegal(k)}>{nice(k)}</button>)}<a className="chip" href="mailto:support@example.com">Contact support</a><a className="chip" href="https://findahelpline.com" target="_blank" rel="noreferrer">Find a helpline</a></div>
-    {!testBypass && <button className="btn alt" onClick={out}>Log out</button>}</div>;
+  </div>;
 }
 
 export default function App() {
-  const [sess, setSess] = useState(TEST_BYPASS ? { test: true } : undefined), [me, setMe] = useState(null), [v, setV] = useState('boot'), [scan, setScan] = useState(null), [files, setFiles] = useState(null), [from, setFrom] = useState('home'), [loadError, setLoadError] = useState('');
-  useEffect(() => {
-    if (TEST_BYPASS) return;
-    sb.auth.getSession().then(({ data }) => setSess(data.session));
-    const { data: l } = sb.auth.onAuthStateChange((_, s) => setSess(s));
-    return () => l.subscription.unsubscribe();
+  const [sess, setSess] = useState(), [me, setMe] = useState(null), [v, setV] = useState('boot'), [scan, setScan] = useState(null), [files, setFiles] = useState(null), [from, setFrom] = useState('home'), [loadError, setLoadError] = useState(''), [sessionError, setSessionError] = useState('');
+  const startGuestSession = useCallback(async () => {
+    setSessionError('');
+    try {
+      const { data, error } = await sb.auth.getSession();
+      if (error) throw error;
+      if (data.session) {
+        setSess(data.session);
+        return;
+      }
+      const { data: guest, error: guestError } = await sb.auth.signInAnonymously();
+      if (guestError) throw guestError;
+      if (!guest.session) throw new Error('Could not start a guest session.');
+      setSess(guest.session);
+    } catch (error) {
+      setSess(null);
+      setSessionError(error instanceof Error ? error.message : 'Could not start a guest session.');
+    }
   }, []);
+  useEffect(() => {
+    const { data: l } = sb.auth.onAuthStateChange((event, s) => {
+      setSess(s);
+      if (event === 'SIGNED_OUT') queueMicrotask(startGuestSession);
+    });
+    startGuestSession();
+    return () => l.subscription.unsubscribe();
+  }, [startGuestSession]);
   const load = useCallback(async (next) => {
     setLoadError('');
     const m = await api('me');
@@ -254,8 +251,8 @@ export default function App() {
   const open = async id => { const r = await api('scan?id=' + id); setScan(r.scan); setV('results'); };
   const go = (to, f) => { if (to === 'analyzing') setFiles(f); if (to === 'paywall') setFrom(v); setV(to); };
   const tab = t => { setV(t); if (t === 'plan' || t === 'results') api('scan').then(r => setScan(r.scan)); };
-  if (sess === undefined) return <div className="app" />;
-  if (!sess) return <div className="app"><Auth /></div>;
+  if (sess === undefined) return <div className="app"><p>Starting a private guest session...</p></div>;
+  if (!sess) return <div className="app"><h1>Could not start Facet AI</h1><p className="err" role="alert">{sessionError}</p><button className="btn" onClick={startGuestSession}>Try again</button></div>;
   if (!me) return <div className="app">{loadError ? <><h1>Could not load Facet AI</h1><p className="err" role="alert">{loadError}</p><button className="btn" onClick={() => load().catch(e => setLoadError(e.message))}>Try again</button></> : <p>Loading...</p>}</div>;
   if (v === 'welcome') return <div className="app"><Onboard done={() => load('scan')} /></div>;
   if (v === 'paywall') return <div className="app"><Paywall me={me} back={() => setV(from === 'paywall' ? 'home' : from)} done={async () => { await load(from === 'paywall' ? 'home' : from); }} /></div>;
@@ -272,7 +269,7 @@ export default function App() {
     {v === 'plan' && <Plan s={scan} go={go} setS={setScan} />}
     {v === 'coach' && <Coach me={me} go={go} />}
     {v === 'history' && <History go={go} open={open} me={me} />}
-    {v === 'settings' && <Settings me={me} reload={() => load()} out={() => sb.auth.signOut()} go={go} testBypass={TEST_BYPASS} />}
+    {v === 'settings' && <Settings me={me} reload={() => load()} go={go} />}
     <nav className="tabs" aria-label="Main">{[['home', 'Home'], ['scan', 'Scan'], ['plan', 'Plan'], ['coach', 'Coach'], ['settings', 'Profile']].map(([k, l]) => <button key={k} className={v === k ? 'on' : ''} onClick={() => tab(k)}>{l}</button>)}</nav>
   </div>;
 }

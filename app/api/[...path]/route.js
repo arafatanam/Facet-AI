@@ -387,7 +387,7 @@ async function subscribe(u, b, req) {
   const origin = new URL(req.url).origin;
   const s = await stripe.checkout.sessions.create({
     mode: "subscription",
-    customer_email: u.email,
+    ...(u.isAnonymous ? {} : { customer_email: u.email }),
     metadata: { email: u.email, plan: b.plan },
     line_items: [
       {
@@ -506,7 +506,7 @@ async function handle(req, ctx, method) {
     return J({ deleted: rows.length });
   }
   const u = await getUser(req);
-  if (!u) return E(401, "Sign in required.");
+  if (!u) return E(401, "A guest session is required.");
   const db = admin();
   const body = method === "POST" ? await req.json().catch(() => ({})) : {};
   if (method === "POST" && a === "upload") {
@@ -544,7 +544,8 @@ async function handle(req, ctx, method) {
         .maybeSingle();
       return J({
         id: u.id,
-        email: u.email,
+        email: u.isAnonymous ? "Guest session" : u.email,
+        isAnonymous: u.isAnonymous,
         profile,
         sub,
         paid: await isPaid(u.email),
@@ -653,7 +654,7 @@ async function handle(req, ctx, method) {
           "profiles",
         ])
           await db.from(t).delete().eq("user_email", u.email);
-        if (!u.isTestUser) await db.auth.admin.deleteUser(u.id);
+        await db.auth.admin.deleteUser(u.id);
       }
       return J({ ok: true });
     }
